@@ -1,0 +1,50 @@
+[package]
+name = "picolibc"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.74"
+license = "Apache-2.0"
+description = """
+Builds picolibc from source and statically links it into Rust, for baremetal
+targets such as UEFI. Generates Rust bindings to the libc/libm types and
+functions, and exposes the C include directory to downstream -sys crates so
+they can compile/link further C libraries against the same libc.
+"""
+repository = "https://github.com/zeronsoftn/picolibc-rs"
+readme = "README.md"
+keywords = ["picolibc", "libc", "baremetal", "uefi", "no_std"]
+categories = ["no-std", "external-ffi-bindings", "embedded"]
+# `links = "c"` claims the native "c" library for this build graph and makes the
+# `cargo::metadata=include=...` keys emitted by build.rs available to dependents
+# as the `DEP_C_INCLUDE` environment variable.
+links = "c"
+exclude = [
+    "third_party/picolibc/test/*",
+    "third_party/picolibc/doc/*",
+    "third_party/picolibc/.github/*",
+]
+
+[lib]
+# Pure FFI/bindings crate; no doctests against the generated bindings.
+doctest = false
+
+[features]
+default = ["bindings"]
+# Run `bindgen` at build time to (re)generate `bindings.rs`. Requires libclang
+# to be available on the host. Disable (`default-features = false`) to skip
+# binding generation when you only need the static library + C headers.
+bindings = ["dep:bindgen"]
+# Export `malloc`/`free`/`realloc`/`calloc` (C ABI) backed by the Rust global
+# allocator, so picolibc (built without its own allocator) and other linked C
+# code can allocate. The final binary must register a `#[global_allocator]`.
+# Implementation ported from `malloc-rust` (Boost Software License 1.0).
+malloc = []
+
+[build-dependencies]
+anyhow = "1"
+cc = "1.2"
+bindgen = { version = "0.72", features = ["prettyplease"], optional = true }
+
+[package.metadata.docs.rs]
+# docs.rs has no cross C toolchain for baremetal targets; document on the host.
+default-target = "x86_64-unknown-linux-gnu"
