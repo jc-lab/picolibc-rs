@@ -10,7 +10,7 @@ targets such as UEFI. Generates Rust bindings to the libc/libm types and
 functions, and exposes the C include directory to downstream -sys crates so
 they can compile/link further C libraries against the same libc.
 """
-repository = "https://github.com/zeronsoftn/picolibc-rs"
+repository = "https://github.com/jc-lab/picolibc-rs"
 readme = "README.md"
 keywords = ["picolibc", "libc", "baremetal", "uefi", "no_std"]
 categories = ["no-std", "external-ffi-bindings", "embedded"]
