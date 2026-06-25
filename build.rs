@@ -319,13 +319,20 @@ fn arch_config(target_arch: &str) -> Result<ArchConfig> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Recursively copy every `*.h` under `base` into `include_dir`.
-fn copy_includes(include_dir: &Path, base: &Path) -> Result<()> {
+/// Recursively copy every `*.h` under `base` into `include_dir`, skipping any
+/// file whose name appears in `skip`.
+fn copy_includes(include_dir: &Path, base: &Path, skip: &[&str]) -> Result<()> {
     let entries =
         fs::read_dir(base).with_context(|| format!("could not open include dir {base:?}"))?;
     for entry in entries {
         let entry = entry.with_context(|| format!("could not read include dir {base:?}"))?;
         let src = entry.path();
+        if skip
+            .iter()
+            .any(|s| src.file_name() == Some(std::ffi::OsStr::new(s)))
+        {
+            continue;
+        }
         let dst = include_dir.join(entry.file_name());
         let kind = entry
             .file_type()
@@ -333,7 +340,7 @@ fn copy_includes(include_dir: &Path, base: &Path) -> Result<()> {
         if kind.is_dir() {
             fs::create_dir_all(&dst)
                 .with_context(|| format!("could not create include dir {dst:?}"))?;
-            copy_includes(&dst, &src)?;
+            copy_includes(&dst, &src, skip)?;
         } else if src.extension() == Some(std::ffi::OsStr::new("h")) {
             fs::copy(&src, &dst).with_context(|| format!("could not copy header {src:?}"))?;
         }
@@ -458,6 +465,30 @@ fn add_libm(build: &mut cc::Build, picolibc_dir: &Path, arch: &ArchConfig) {
 // Bindgen
 // ---------------------------------------------------------------------------
 
+/// Pick the clang `--target` triple bindgen should parse headers with.
+///
+/// It must produce the same C data model (notably the width of `long`) as both
+/// the compiled library and the Rust target's `core::ffi` types — otherwise the
+/// generated bindings disagree about `long`/`ssize_t`/etc. and bindgen's
+/// `size_t == usize` assertion fails.
+///
+/// The subtlety is UEFI: clang's `*-unknown-uefi` triple is **LP64** (`long` is
+/// 8 bytes), but UEFI actually uses the Windows **LLP64** ABI (`long` is 4
+/// bytes). Rust's `*-unknown-uefi` targets and cc-rs (which compiles UEFI code
+/// as `*-windows-gnu`) both follow LLP64. So for a `*-unknown-uefi` target we
+/// hand bindgen the matching `*-windows-gnu` triple instead.
+#[cfg(feature = "bindings")]
+fn bindgen_clang_target() -> Option<String> {
+    if let Ok(t) = env::var("PICOLIBC_CLANG_TARGET") {
+        return Some(t);
+    }
+    let target = env::var("TARGET").ok()?;
+    if let Some(prefix) = target.strip_suffix("-unknown-uefi") {
+        return Some(format!("{prefix}-unknown-windows-gnu"));
+    }
+    Some(target)
+}
+
 #[cfg(feature = "bindings")]
 fn generate_bindings(include_dir: &Path, out_dir: &Path) -> Result<()> {
     use bindgen::Formatter::Prettyplease;
@@ -504,7 +535,7 @@ fn generate_bindings(include_dir: &Path, out_dir: &Path) -> Result<()> {
         .generate_cstr(true)
         .layout_tests(false);
 
-    if let Ok(t) = env::var("PICOLIBC_CLANG_TARGET").or_else(|_| env::var("TARGET")) {
+    if let Some(t) = bindgen_clang_target() {
         builder = builder.clang_arg(format!("--target={t}"));
     }
 
@@ -559,7 +590,7 @@ fn main() -> Result<()> {
     //    crates have a self-contained include tree (DEP_C_INCLUDE).
     //    The generated picolibc.h is already there and will not be overwritten
     //    (picolibc's libc/include does not contain a picolibc.h).
-    copy_includes(&include_dir, &picolibc_dir.join("libc/include"))?;
+    copy_includes(&include_dir, &picolibc_dir.join("libc/include"), &[])?;
 
     // 3b. Override the generic `machine/*.h` headers with arch-specific ones.
     //
@@ -569,11 +600,19 @@ fn main() -> Result<()> {
     //     definitions needed by arch machine sources like `libm/machine/x86/fenv.c`.
     //     Since OUT_DIR/include is first in the include search path, we must
     //     overwrite those generics with the arch-specific versions here.
+    //
+    //     `_types.h` is deliberately NOT overridden: aarch64's machine
+    //     `_types.h` hardcodes `typedef long signed int _ssize_t`, which is
+    //     pointer-sized only under LP64. UEFI uses the Windows LLP64 ABI
+    //     (`long` == 4 bytes), so that would make `ssize_t` 4 bytes while the
+    //     pointer is 8 — breaking POSIX semantics and tripping bindgen's
+    //     `size_t == usize` check. The generic `machine/_types.h` instead
+    //     derives `ssize_t` from `__SIZE_TYPE__`, which is always pointer-sized.
     if let Some(machine_dir) = arch.machine_headers_dir {
         let machine_inc = include_dir.join("machine");
         fs::create_dir_all(&machine_inc)
             .with_context(|| format!("could not create {machine_inc:?}"))?;
-        copy_includes(&machine_inc, &picolibc_dir.join(machine_dir))?;
+        copy_includes(&machine_inc, &picolibc_dir.join(machine_dir), &["_types.h"])?;
     }
 
     // 4. Optionally generate Rust FFI bindings.
