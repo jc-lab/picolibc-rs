@@ -44,9 +44,10 @@ default = [
 # Disable with `default-features = false` when you only need the static lib.
 bindings = ["dep:bindgen"]
 
-# Export malloc/free/realloc/calloc (C ABI) backed by the Rust global
-# allocator. Requires a `#[global_allocator]` in the final binary.
-# Ported from malloc-rust (Boost Software License 1.0).
+# Export malloc/free/realloc/calloc/aligned_alloc/memalign/posix_memalign
+# (C ABI) backed by the Rust global allocator.
+# Requires a `#[global_allocator]` in the final binary.
+# Implementation ported from hyperlight_guest_bin::memory (Apache-2.0).
 malloc = []
 
 # ── stdio ────────────────────────────────────────────────────────────────────

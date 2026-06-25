@@ -265,6 +265,14 @@ struct ArchConfig {
     /// Machine libc sources that must be dropped on COFF/Win64 (ELF asm).
     coff_excluded_libc: Vec<&'static str>,
     include_dirs: Vec<&'static str>,
+    /// `libc/machine/<arch>/machine/` directory, relative to the picolibc root.
+    ///
+    /// The arch-specific `machine/*.h` headers (e.g. `machine/fenv.h` with the
+    /// struct-based `fenv_t` for x86) must shadow the generic
+    /// `libc/include/machine/` headers in `OUT_DIR/include/machine/`. Without
+    /// this override the generic `typedef int fenv_t` is found first, causing
+    /// the x86 `libm/machine/x86/fenv.c` to fail to compile.
+    machine_headers_dir: Option<&'static str>,
     is_x86: bool,
     is_aarch64: bool,
 }
@@ -281,6 +289,7 @@ fn arch_config(target_arch: &str) -> Result<ArchConfig> {
                 "machine/x86/tcb.S",
             ],
             include_dirs: vec!["libc/machine/x86", "libm/machine/x86"],
+            machine_headers_dir: Some("libc/machine/x86/machine"),
             is_x86: true,
             is_aarch64: false,
         }),
@@ -294,6 +303,7 @@ fn arch_config(target_arch: &str) -> Result<ArchConfig> {
             libc_generic_exclude: LIBC_FILES_AARCH64_EXCLUDE.to_vec(),
             coff_excluded_libc: LIBC_FILES_AARCH64_ASM.to_vec(),
             include_dirs: vec!["libc/machine/aarch64"],
+            machine_headers_dir: Some("libc/machine/aarch64/machine"),
             is_x86: false,
             is_aarch64: true,
         }),
@@ -550,6 +560,21 @@ fn main() -> Result<()> {
     //    The generated picolibc.h is already there and will not be overwritten
     //    (picolibc's libc/include does not contain a picolibc.h).
     copy_includes(&include_dir, &picolibc_dir.join("libc/include"))?;
+
+    // 3b. Override the generic `machine/*.h` headers with arch-specific ones.
+    //
+    //     `libc/include/machine/` contains generic fallbacks (e.g. `fenv.h`
+    //     with `typedef int fenv_t`). The arch-specific directory (e.g.
+    //     `libc/machine/x86/machine/fenv.h`) provides the real struct-based
+    //     definitions needed by arch machine sources like `libm/machine/x86/fenv.c`.
+    //     Since OUT_DIR/include is first in the include search path, we must
+    //     overwrite those generics with the arch-specific versions here.
+    if let Some(machine_dir) = arch.machine_headers_dir {
+        let machine_inc = include_dir.join("machine");
+        fs::create_dir_all(&machine_inc)
+            .with_context(|| format!("could not create {machine_inc:?}"))?;
+        copy_includes(&machine_inc, &picolibc_dir.join(machine_dir))?;
+    }
 
     // 4. Optionally generate Rust FFI bindings.
     #[cfg(feature = "bindings")]

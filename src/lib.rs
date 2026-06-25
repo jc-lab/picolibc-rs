@@ -70,13 +70,11 @@ limitations under the License.
 #![allow(non_snake_case)]
 #![allow(clippy::all)]
 
-#[cfg(feature = "malloc")]
-extern crate alloc;
-
-/// `malloc`/`free`/`realloc`/`calloc` backed by the Rust global allocator.
+/// `malloc`/`free`/`realloc`/`calloc`/`aligned_alloc`/`memalign`/`posix_memalign`
+/// backed by the Rust global allocator.
 ///
-/// Enabled by the `malloc` feature. The final binary must register a
-/// `#[global_allocator]`. See the module docs for details.
+/// Only present (and only compiled) when the `malloc` feature is enabled.
+/// The final binary must register a `#[global_allocator]`.
 #[cfg(feature = "malloc")]
 pub mod malloc;
 
