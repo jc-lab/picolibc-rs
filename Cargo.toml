@@ -29,16 +29,98 @@ exclude = [
 doctest = false
 
 [features]
-default = ["bindings"]
-# Run `bindgen` at build time to (re)generate `bindings.rs`. Requires libclang
-# to be available on the host. Disable (`default-features = false`) to skip
-# binding generation when you only need the static library + C headers.
+default = [
+    "bindings",
+    # stdio defaults (match current picolibc.h behaviour)
+    "posix-console",
+    "assert-verbose",
+    "fast-strcmp",
+    "fast-bufio",
+    "io-float-exact",
+    "io-wchar",
+]
+
+# ── Core ─────────────────────────────────────────────────────────────────────
+
+# Generate Rust FFI bindings with bindgen at build time. Requires libclang.
+# Disable with `default-features = false` when you only need the static lib.
 bindings = ["dep:bindgen"]
-# Export `malloc`/`free`/`realloc`/`calloc` (C ABI) backed by the Rust global
-# allocator, so picolibc (built without its own allocator) and other linked C
-# code can allocate. The final binary must register a `#[global_allocator]`.
-# Implementation ported from `malloc-rust` (Boost Software License 1.0).
+
+# Export malloc/free/realloc/calloc (C ABI) backed by the Rust global
+# allocator. Requires a `#[global_allocator]` in the final binary.
+# Ported from malloc-rust (Boost Software License 1.0).
 malloc = []
+
+# ── stdio ────────────────────────────────────────────────────────────────────
+
+# Wire stdin/stdout/stderr to POSIX file descriptors 0/1/2 via read()/write().
+# When disabled, the embedder must provide its own stdin/stdout/stderr symbols.
+# Corresponds to meson option: posix-console
+posix-console = []
+
+# Enable C99 printf/scanf formats: %zu, %hhu, %td, %jd, etc.
+# Corresponds to meson option: io-c99-formats  (__IO_C99_FORMATS)
+io-c99-formats = []
+
+# Enable %lld/%llu/%llo/%llx in printf/scanf.
+# Corresponds to meson option: io-long-long  (__IO_LONG_LONG)
+io-long-long = []
+
+# Enable %Lf/%Le/%Lg (long double) in printf/scanf.
+# Corresponds to meson option: io-long-double  (__IO_LONG_DOUBLE)
+io-long-double = []
+
+# Enable POSIX positional arguments (%1$d) in printf.
+# Corresponds to meson option: io-pos-args  (__IO_POS_ARGS)
+io-pos-args = []
+
+# Enable %b/%B binary integer format in printf/scanf (C23).
+# Corresponds to meson option: io-percent-b  (__IO_PERCENT_B)
+io-percent-b = []
+
+# Enable %n (write-bytes-so-far) in printf. Off by default for safety.
+# Corresponds to meson option: printf-percent-n  (__IO_PERCENT_N)
+printf-percent-n = []
+
+# Enable %lld in the minimal printf/scanf variant.
+# Corresponds to meson option: minimal-io-long-long  (__IO_MINIMAL_LONG_LONG)
+minimal-io-long-long = []
+
+# Use round-trip–accurate float↔string conversion.
+# Corresponds to meson option: io-float-exact  (__IO_FLOAT_EXACT)
+io-float-exact = []
+
+# Enable wide-character support (%ls/%lc) in printf/scanf.
+# Corresponds to meson option: io-wchar  (__IO_WCHAR)
+io-wchar = []
+
+# Use faster buffered-I/O operations.
+# Corresponds to meson option: fast-bufio  (__FAST_BUFIO)
+fast-bufio = []
+
+# ── string ───────────────────────────────────────────────────────────────────
+
+# Always optimise strcmp for performance (vs size).
+# Corresponds to meson option: fast-strcmp  (__FAST_STRCMP)
+fast-strcmp = []
+
+# ── diagnostics ──────────────────────────────────────────────────────────────
+
+# Emit verbose file/line info in assert() failures.
+# Corresponds to meson option: assert-verbose  (__ASSERT_VERBOSE)
+assert-verbose = []
+
+# ── internationalisation ─────────────────────────────────────────────────────
+
+# Enable multibyte / UTF-8 charset support.
+# Corresponds to meson option: mb-capable  (__MB_CAPABLE)
+mb-capable = []
+
+# ── math ─────────────────────────────────────────────────────────────────────
+
+# Set errno in math functions per C standard (disables IEEE no-errno mode).
+# Corresponds to meson option: want-math-errno  (__MATH_ERRNO / !__IEEE_LIBM)
+math-errno = []
 
 [build-dependencies]
 anyhow = "1"

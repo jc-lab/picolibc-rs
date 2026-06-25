@@ -22,6 +22,16 @@ limitations under the License.
 //! upstream picolibc's build files and the hyperlight-libc crate, restricted
 //! to the permissively-licensed sources shipped in picolibc-bsd.
 
+/// Source files for the `posix-console` feature: provide stdin/stdout/stderr
+/// backed by POSIX file descriptors 0/1/2 via `read()`/`write()`.
+/// When this feature is disabled these three files are omitted; the embedder
+/// must then supply its own `stdin`, `stdout`, and `stderr` symbols.
+pub(crate) const LIBC_FILES_POSIX_CONSOLE: &[&str] = &[
+    "stdio/posixiob_stdin.c",
+    "stdio/posixiob_stdout.c",
+    "stdio/posixiob_stderr.c",
+];
+
 pub(crate) const LIBC_FILES: &[&str] = &[
     "argz/argz_add.c",
     "argz/argz_add_sep.c",
@@ -277,9 +287,7 @@ pub(crate) const LIBC_FILES: &[&str] = &[
     "stdio/matchcaseprefix.c",
     "stdio/mktemp.c",
     "stdio/perror.c",
-    "stdio/posixiob_stderr.c",
-    "stdio/posixiob_stdin.c",
-    "stdio/posixiob_stdout.c",
+    // posixiob_stdin/stdout/stderr are in LIBC_FILES_POSIX_CONSOLE (feature-gated)
     "stdio/printf.c",
     "stdio/putchar.c",
     "stdio/puts.c",
