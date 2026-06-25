@@ -57,6 +57,17 @@ malloc = []
 # Corresponds to meson option: posix-console
 posix-console = []
 
+# COFF/PE target fixups (UEFI, *-windows-*).
+# picolibc exports stdin/stdout/stderr as *weak aliases* of __posix_std*
+# (`__weak_reference`). On COFF the weak-alias machinery is emitted via a
+# Mach-O `.weak_reference` directive and produces a broken weak external that
+# the COFF linker reports as a duplicate symbol. Enabling this feature patches
+# the posix-console sources at build time to use a *strong* alias
+# (`__strong_reference`, i.e. __attribute__((alias))), yielding a single normal
+# strong stdin/stdout/stderr symbol. Only affects the build when `posix-console`
+# is also enabled. Enable this for UEFI / Windows targets.
+coff = []
+
 # Enable C99 printf/scanf formats: %zu, %hhu, %td, %jd, etc.
 # Corresponds to meson option: io-c99-formats  (__IO_C99_FORMATS)
 io-c99-formats = []
