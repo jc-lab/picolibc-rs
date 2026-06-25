@@ -26,6 +26,7 @@ limitations under the License.
 /// backed by POSIX file descriptors 0/1/2 via `read()`/`write()`.
 /// When this feature is disabled these three files are omitted; the embedder
 /// must then supply its own `stdin`, `stdout`, and `stderr` symbols.
+#[cfg_attr(not(feature = "posix-console"), allow(dead_code))]
 pub(crate) const LIBC_FILES_POSIX_CONSOLE: &[&str] = &[
     "stdio/posixiob_stdin.c",
     "stdio/posixiob_stdout.c",

@@ -432,7 +432,68 @@ fn cc_build(
     Ok(build)
 }
 
-fn add_libc(build: &mut cc::Build, picolibc_dir: &Path, arch: &ArchConfig, coff: bool) {
+/// Source-level edits applied to picolibc libc sources on COFF/PE targets, keyed
+/// by the libc-relative path. Active only when the `coff` feature is enabled.
+///
+/// picolibc ties stdin/stdout/stderr together with weak symbols, which the
+/// COFF/clang toolchain mishandles. posixiob_*.c export them as weak *aliases*
+/// via `__weak_reference` (which expands to a Mach-O `.weak_reference` directive
+/// → a broken weak external), while fread.c / bufio.c declare them as weak
+/// *references* (`__weak`) so they can be absent — on COFF those become weak
+/// externals with per-TU default targets that collide. Together the COFF linker
+/// reports stdin/stdout/stderr as duplicate symbols.
+///
+/// The edits below turn the alias strong (`__strong_reference`,
+/// `__attribute__((alias))`) and drop the `__weak` qualifier from the
+/// references, yielding a single strong definition that everything else binds
+/// to. Note: this makes stdin/stdout/stderr *required* at link time (provide
+/// them via `posix-console` or your own definitions).
+fn coff_patches(rel: &str) -> &'static [(&'static str, &'static str)] {
+    if !cfg!(feature = "coff") {
+        return &[];
+    }
+    match rel {
+        "stdio/posixiob_stdin.c" | "stdio/posixiob_stdout.c" | "stdio/posixiob_stderr.c" => {
+            &[("__weak_reference", "__strong_reference")]
+        }
+        "stdio/fread.c" | "stdio/bufio.c" => &[
+            ("const stdin __weak", "const stdin"),
+            ("const stdout __weak", "const stdout"),
+            ("const stderr __weak", "const stderr"),
+        ],
+        _ => &[],
+    }
+}
+
+/// Resolve the on-disk source to compile for a libc-relative path. If the file
+/// has COFF patches (and the `coff` feature is on), a patched copy is written
+/// under `OUT_DIR/coff_patched/` and that path is returned; otherwise the
+/// original vendored source is used.
+fn libc_source(picolibc_dir: &Path, out_dir: &Path, rel: &str) -> Result<PathBuf> {
+    let original = picolibc_dir.join("libc").join(rel);
+    let patches = coff_patches(rel);
+    if patches.is_empty() {
+        return Ok(original);
+    }
+    let mut contents =
+        fs::read_to_string(&original).with_context(|| format!("could not read {original:?}"))?;
+    for (from, to) in patches {
+        contents = contents.replace(from, to);
+    }
+    let dir = out_dir.join("coff_patched");
+    fs::create_dir_all(&dir).with_context(|| format!("could not create {dir:?}"))?;
+    let dst = dir.join(rel.replace('/', "_"));
+    fs::write(&dst, contents).with_context(|| format!("could not write {dst:?}"))?;
+    Ok(dst)
+}
+
+fn add_libc(
+    build: &mut cc::Build,
+    picolibc_dir: &Path,
+    out_dir: &Path,
+    arch: &ArchConfig,
+    coff: bool,
+) -> Result<()> {
     for file in LIBC_FILES.iter().chain(arch.libc_machine.iter()) {
         if arch.libc_generic_exclude.contains(file) {
             continue;
@@ -440,46 +501,17 @@ fn add_libc(build: &mut cc::Build, picolibc_dir: &Path, arch: &ArchConfig, coff:
         if coff && arch.coff_excluded_libc.contains(file) {
             continue;
         }
-        build.file(picolibc_dir.join("libc").join(file));
+        build.file(libc_source(picolibc_dir, out_dir, file)?);
     }
+    Ok(())
 }
 
 /// Add the POSIX-fd-backed stdin/stdout/stderr sources (`posixiob_*.c`), gated
-/// on the `posix-console` feature.
-///
-/// With the `coff` feature enabled, the sources are patched on the fly so that
-/// `stdin`/`stdout`/`stderr` are exported as *strong* aliases of `__posix_std*`
-/// instead of weak ones. picolibc's `__weak_reference` expands, on a COFF/clang
-/// target, to a Mach-O `.weak_reference` directive that yields a broken weak
-/// external — the COFF linker then reports the symbol as a duplicate. Rewriting
-/// `__weak_reference` to `__strong_reference` (`__attribute__((alias))`) emits a
-/// single normal strong symbol, which links cleanly on COFF/PE.
+/// on the `posix-console` feature. COFF patching is handled by [`libc_source`].
 #[cfg(feature = "posix-console")]
 fn add_posix_console(build: &mut cc::Build, picolibc_dir: &Path, out_dir: &Path) -> Result<()> {
-    let patch = cfg!(feature = "coff");
-    let patched_dir = out_dir.join("posix_console_patched");
-    if patch {
-        fs::create_dir_all(&patched_dir)
-            .with_context(|| format!("could not create {patched_dir:?}"))?;
-    }
-
     for file in LIBC_FILES_POSIX_CONSOLE {
-        let src = picolibc_dir.join("libc").join(file);
-        if patch {
-            let contents =
-                fs::read_to_string(&src).with_context(|| format!("could not read {src:?}"))?;
-            // Turn the weak alias into a strong one. Both macros take the same
-            // `(sym, alias)` arguments, so a textual swap is sufficient.
-            let patched = contents.replace("__weak_reference", "__strong_reference");
-            let name = Path::new(file)
-                .file_name()
-                .expect("posix-console source has a file name");
-            let dst = patched_dir.join(name);
-            fs::write(&dst, patched).with_context(|| format!("could not write {dst:?}"))?;
-            build.file(&dst);
-        } else {
-            build.file(&src);
-        }
+        build.file(libc_source(picolibc_dir, out_dir, file)?);
     }
     Ok(())
 }
@@ -617,7 +649,7 @@ fn main() -> Result<()> {
 
     // 2. Compile picolibc (libc + libm).
     let mut build = cc_build(&picolibc_dir, &include_dir, &arch, coff)?;
-    add_libc(&mut build, &picolibc_dir, &arch, coff);
+    add_libc(&mut build, &picolibc_dir, &out_dir, &arch, coff)?;
     add_posix_console(&mut build, &picolibc_dir, &out_dir)?;
     add_libm(&mut build, &picolibc_dir, &arch);
     build.compile("picolibc");
