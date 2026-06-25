@@ -31,13 +31,11 @@ doctest = false
 [features]
 default = [
     "bindings",
-    # stdio defaults (match current picolibc.h behaviour)
-    "posix-console",
-    "assert-verbose",
-    "fast-strcmp",
-    "fast-bufio",
-    "io-float-exact",
-    "io-wchar",
+    # Defaults match meson_options.txt values exactly.
+    "assert-verbose",   # assert-verbose = true
+    "fast-strcmp",      # fast-strcmp    = true
+    "io-c99-formats",   # io-c99-formats = true
+    "io-float-exact",   # io-float-exact = true
 ]
 
 # ── Core ─────────────────────────────────────────────────────────────────────
