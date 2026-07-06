@@ -28,7 +28,13 @@ permissive sources only). The build script and source lists are derived from
 
 - **clang** on the host (picolibc is built freestanding; clang is the compiler
   that can target every baremetal/UEFI triple). cc-rs selects it automatically
-  for `*-uefi` targets.
+  for `*-uefi` targets. For `*-windows-msvc` targets the C is compiled with the
+  `*-windows-gnu` environment (same LLP64 ABI and COFF objects) because the MSVC
+  environment rejects the GCC weak aliases picolibc uses.
+- **llvm** (`llvm-lib`) when cross-compiling to `*-windows-msvc` from a
+  non-Windows host: cc-rs would otherwise archive with the MSVC `lib.exe`, which
+  is absent there. The build falls back to `llvm-lib` automatically when
+  `lib.exe` is not on `PATH` (override with `AR`).
 - **libclang** on the host, only when the `bindings` feature is enabled (the
   default). Point `LIBCLANG_PATH` at it if bindgen can't find it, e.g.
   `LIBCLANG_PATH=/usr/lib/llvm-18/lib`.

@@ -350,6 +350,39 @@ fn copy_includes(include_dir: &Path, base: &Path, skip: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// Map a Rust target triple to the clang `--target` picolibc's C sources should
+/// be compiled (and parsed by bindgen) with. Returns `None` when the Rust target
+/// can be used verbatim, letting cc-rs pick its own default.
+///
+/// Two Windows-family Rust targets need remapping because clang's toolchain for
+/// them mishandles picolibc's GNU-style C:
+///
+/// * `*-unknown-uefi`: clang's `uefi` triple is LP64 (`long` == 8), but UEFI
+///   actually uses the Windows LLP64 ABI (`long` == 4). cc-rs already compiles
+///   UEFI as `*-windows-gnu`; we mirror that so bindgen agrees on `long` width.
+///
+/// * `*-windows-msvc`: the MSVC environment rejects GCC weak aliases
+///   (`__attribute__((weak, alias(...)))`), which picolibc uses throughout
+///   (getauxval.c, the stdio atomics, ssp/stack_protector.c, ...), so the C
+///   fails to even compile. The GNU environment accepts them and shares the same
+///   (LLP64) ABI and COFF object format, so we build the C as `*-windows-gnu`
+///   and link the resulting objects into the MSVC binary.
+fn remap_clang_target(target: &str) -> Option<String> {
+    if let Some(prefix) = target.strip_suffix("-unknown-uefi") {
+        return Some(format!("{prefix}-unknown-windows-gnu"));
+    }
+    if let Some(idx) = target.find("-windows-msvc") {
+        return Some(format!("{}-windows-gnu", &target[..idx]));
+    }
+    None
+}
+
+/// Whether an executable named `tool` exists on `PATH`.
+fn find_on_path(tool: &str) -> bool {
+    env::var_os("PATH")
+        .is_some_and(|paths| env::split_paths(&paths).any(|dir| dir.join(tool).is_file()))
+}
+
 fn init_submodule(picolibc_dir: &Path) -> Result<()> {
     if picolibc_dir.join("COPYING.picolibc").exists() {
         return Ok(());
@@ -387,7 +420,14 @@ fn cc_build(
         .unwrap_or_else(|_| "clang".to_string());
     build.compiler(compiler);
 
-    if let Ok(t) = env::var("PICOLIBC_CLANG_TARGET") {
+    // Resolve the clang `--target`: an explicit override wins, otherwise remap
+    // the Windows-family targets clang can't build picolibc for as-is (see
+    // `remap_clang_target`). When neither applies, leave it to cc-rs. A flag we
+    // add here comes after cc-rs's own `--target`, and the last one wins.
+    let clang_target = env::var("PICOLIBC_CLANG_TARGET")
+        .ok()
+        .or_else(|| remap_clang_target(&env::var("TARGET").unwrap_or_default()));
+    if let Some(t) = clang_target {
         build.flag(format!("--target={t}"));
     }
 
@@ -404,6 +444,24 @@ fn cc_build(
         .flag("-Wno-missing-braces")
         .flag("-Wno-return-type")
         .warnings(false);
+
+    // Cross-compiling to `*-windows-msvc` (e.g. from Linux), cc-rs archives with
+    // the MSVC librarian `lib.exe`, which isn't present off a Windows/MSVC host.
+    // LLVM ships `llvm-lib`, a drop-in replacement; use it when `lib.exe` is
+    // absent and no archiver override is set. On a real MSVC host `lib.exe` is
+    // found and used unchanged.
+    let target = env::var("TARGET").unwrap_or_default();
+    let target_underscored = target.replace('-', "_");
+    let ar_overridden = env::var_os("AR").is_some()
+        || env::var_os("TARGET_AR").is_some()
+        || env::var_os(format!("AR_{target_underscored}")).is_some();
+    if target.contains("-windows-msvc")
+        && !ar_overridden
+        && !find_on_path("lib.exe")
+        && find_on_path("llvm-lib")
+    {
+        build.archiver("llvm-lib");
+    }
 
     if arch.is_x86 {
         build.flag_if_supported("-mno-red-zone");
@@ -539,21 +597,19 @@ fn add_libm(build: &mut cc::Build, picolibc_dir: &Path, arch: &ArchConfig) {
 /// generated bindings disagree about `long`/`ssize_t`/etc. and bindgen's
 /// `size_t == usize` assertion fails.
 ///
-/// The subtlety is UEFI: clang's `*-unknown-uefi` triple is **LP64** (`long` is
-/// 8 bytes), but UEFI actually uses the Windows **LLP64** ABI (`long` is 4
-/// bytes). Rust's `*-unknown-uefi` targets and cc-rs (which compiles UEFI code
-/// as `*-windows-gnu`) both follow LLP64. So for a `*-unknown-uefi` target we
-/// hand bindgen the matching `*-windows-gnu` triple instead.
+/// The subtlety is the Windows family: clang's `*-unknown-uefi` triple is
+/// **LP64** (`long` is 8 bytes), but UEFI actually uses the Windows **LLP64**
+/// ABI (`long` is 4 bytes), and `*-windows-msvc` needs the same GNU-environment
+/// remap the C compile uses (see [`remap_clang_target`]). Both remaps land on a
+/// `*-windows-gnu` triple, which is LLP64 — matching Rust's targets and the
+/// compiled library.
 #[cfg(feature = "bindings")]
 fn bindgen_clang_target() -> Option<String> {
     if let Ok(t) = env::var("PICOLIBC_CLANG_TARGET") {
         return Some(t);
     }
     let target = env::var("TARGET").ok()?;
-    if let Some(prefix) = target.strip_suffix("-unknown-uefi") {
-        return Some(format!("{prefix}-unknown-windows-gnu"));
-    }
-    Some(target)
+    Some(remap_clang_target(&target).unwrap_or(target))
 }
 
 #[cfg(feature = "bindings")]
