@@ -16,6 +16,8 @@ jobs:
           - aarch64-unknown-uefi
           - x86_64-unknown-none
           - aarch64-unknown-none
+          - x86_64-pc-windows-msvc
+          - aarch64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v6
         with:
@@ -24,8 +26,9 @@ jobs:
           submodules: recursive
 
       - name: Install clang / libclang
-        # clang compiles the picolibc C sources (and cross-targets UEFI/none),
-        # libclang is needed by bindgen, llvm provides llvm-ar for archiving.
+        # clang compiles the picolibc C sources (cross-targeting UEFI/none, and
+        # windows-msvc via the windows-gnu environment), libclang is needed by
+        # bindgen, llvm provides llvm-ar / llvm-lib for archiving.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang libclang-dev llvm
