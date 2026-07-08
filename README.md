@@ -72,6 +72,24 @@ To skip bindgen (static library + C headers only):
 picolibc = { version = "0.1", default-features = false }
 ```
 
+### libc-compatible C types
+
+The crate root re-exports the C primitive types under the same names as the
+[`libc`](https://docs.rs/libc) crate, so `picolibc::c_long` is a drop-in swap for
+`libc::c_long`:
+
+```rust
+use picolibc::{c_char, c_int, c_long, c_void, size_t, ssize_t};
+```
+
+Provided: `c_char`, `c_schar`, `c_uchar`, `c_short`, `c_ushort`, `c_int`,
+`c_uint`, `c_long`, `c_ulong`, `c_longlong`, `c_ulonglong`, `c_float`,
+`c_double`, `c_void`, plus `size_t`, `ssize_t`, `ptrdiff_t`, `intptr_t`,
+`uintptr_t`. These are available even with `default-features = false` (the
+`c_*` set is re-exported from [`core::ffi`], so it always matches the target's C
+ABI). Struct/function/constant bindings and typedefs like `time_t`, `off_t` and
+`wchar_t` come from the generated bindings (the default `bindings` feature).
+
 > **Linking requirement:** a binary only gets picolibc linked if it *uses* this
 > crate from Rust (call anything from `picolibc::bindings` or `picolibc::malloc`,
 > or add `extern crate picolibc;`). Referencing picolibc's C symbols solely

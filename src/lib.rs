@@ -70,6 +70,34 @@ limitations under the License.
 #![allow(non_snake_case)]
 #![allow(clippy::all)]
 
+// ---------------------------------------------------------------------------
+// C primitive types (libc-compatible names)
+// ---------------------------------------------------------------------------
+
+/// C primitive integer/floating type aliases under the same names as the
+/// [`libc`](https://docs.rs/libc) crate, so C types can be referred to as
+/// `picolibc::c_long`, `picolibc::c_char`, `picolibc::c_void`, ... — a drop-in
+/// swap for `libc::c_long` and friends.
+///
+/// These are re-exported from [`core::ffi`], so they always track the active
+/// Rust target's C ABI — matching both `libc`'s definitions and the picolibc
+/// this crate compiles. They are available even without the `bindings` feature,
+/// which is convenient for writing `extern "C"` stub signatures.
+pub use core::ffi::{
+    c_char, c_double, c_float, c_int, c_long, c_longlong, c_schar, c_short, c_uchar, c_uint,
+    c_ulong, c_ulonglong, c_ushort, c_void,
+};
+
+/// Pointer-width integer typedefs matching the [`libc`](https://docs.rs/libc)
+/// crate. bindgen resolves these to `usize`/`isize` inline rather than emitting
+/// aliases, so they are defined here to be reachable as `picolibc::size_t`,
+/// `picolibc::ssize_t`, ... alongside the `c_*` types above.
+pub type size_t = usize;
+pub type ssize_t = isize;
+pub type ptrdiff_t = isize;
+pub type intptr_t = isize;
+pub type uintptr_t = usize;
+
 /// `malloc`/`free`/`realloc`/`calloc`/`aligned_alloc`/`memalign`/`posix_memalign`
 /// backed by the Rust global allocator.
 ///
